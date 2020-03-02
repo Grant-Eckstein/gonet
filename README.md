@@ -1,2 +1,2 @@
-# Golang-Network-Library-
+# Golang-Network-Library
 Simplistic Golang networking
