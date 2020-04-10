@@ -1,29 +1,32 @@
-# Golang Networking Library
+# Golang Networking Library [![Go Report Card](https://goreportcard.com/badge/github.com/GrantEthanEckstein/gonet)](https://goreportcard.com/report/github.com/GrantEthanEckstein/gonet) [![GoDoc](https://godoc.org/github.com/GrantEthanEckstein/gonet?status.svg)](https://godoc.org/github.com/GrantEthanEckstein/gonet)
 *Simplistic Golang networking*
 
 
 ### Overview
-This is a client-server networking library I built for a project. It has two main features:
-1. Simple send/receive functions
-2. A command parsing system
+This is a client-server networking library I built for another project. It is intended to be a extensible base for networking projects.
 
 ### Example Usage
-*Client*
+##### Client
 ```go
 package main
 
-import "gonet"
+import (
+	"gonet"
+)
 
 func main() {
-	// Specify protocol and maximum message length
-	c := gonet.NewConnection("tcp", 2048)
-	
-	// Specify destination address, trigger, and data to send
- 	c.Send("127.0.0.1:8080", "hello", []byte("Jello"))
+		conn := gonet3.NewDataConnection(gonet3.Host{
+			Protocol:   "tcp",
+			Address:    "localhost",
+			Port:       "8080",
+		}, gonet3.Host{})
+
+		conn.Send([]byte("Hello, world!"))
 }
 ```
+<br>
 
-*Server*
+##### Server
 ```go
 package main
 
@@ -32,23 +35,15 @@ import (
 	"gonet"
 )
 
-func hello(name []byte) []byte {
-	return append([]byte("Hello, "), name...)
-}
-
 func main() {
-	// Specify protocol and maximum message length
-	l := gonet.NewConnection("tcp", 2048)
-	
-	// When a message with the trigger "hello" is sent, 
-	// it's data will be ran through hello()
-	l.Trigger("hello", hello)
-	
-	recv := l.Listen(":8080")
-	
-	// ResolveMessageTriggers will return the output 
-	// of the appropriate trigger function
-	message := string(l.ResolveMessageTriggers(recv))
-	fmt.Println(message)
+
+	conn := gonet3.NewDataConnection(gonet3.Host{}, gonet3.Host{
+		Protocol: "tcp",
+		Address:  "localhost",
+		Port:     "8080",
+	})
+
+	data := conn.Recv()
+	fmt.Printf("Recieved \"%s\"\n", data)
 }
 ```
