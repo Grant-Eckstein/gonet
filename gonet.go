@@ -1,192 +1,99 @@
 package gonet
 
 import (
-	"encoding/json"
-	"io/ioutil"
+	"crypto/tls"
 	"log"
 	"net"
-	"os"
 )
 
-// Basic error handling
-func check(e error) {
-	if e != nil {
-		log.Fatal(e)
+// TLSConnection embeds tls.Conn, extending functionality.
+// The main idea is to implement TLSConnection.Send and TLSConnection.Recv
+// allowing for more simple websocket operation.
+type TLSConnection struct {
+	tls.Conn
+	Settings         ConnectionConfiguration
+	Listener         net.Conn
+	Outgoing         *tls.Conn
+	ListenerSettings ListenerConfiguration
+}
+
+// ConnectionConfiguration is included for
+// the express purpose of extensibility.
+type ConnectionConfiguration struct {
+	TLSConnectionConfiguration tls.Config
+	Protocol                   string
+	Addr                       string
+}
+
+// ListenerConfiguration is also included
+// for the express purpose of extensibility.
+type ListenerConfiguration struct {
+	Cert tls.Certificate
+	Addr string
+}
+
+// Check is a basic errer parsing solution.
+func check(err error) {
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
-// Root structure for gonet, stores information necessary for each connection.
-type Host struct {
-	Protocol string
-	Address  string
-	Port     string
+// NewTLS is the constructor for TLSConnection.
+// The primary parameter is the protocol used for the connection.
+// The insecure parameter will set the configuration for using a
+// self-signed certificate. This configuration can be replaced by using
+// TLSConnection.SetConfig.
+func NewTLS(network string, insecure bool) TLSConnection {
+	c := TLSConnection{
+		Conn: tls.Conn{},
+		Settings: ConnectionConfiguration{
+			Protocol: network,
+			Addr:     "",
+		},
+		ListenerSettings: ListenerConfiguration{},
+	}
+	if insecure {
+		c.Settings.TLSConnectionConfiguration = &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			InsecureSkipVerify: true,
+		}
+	}
+	return c
 }
 
-// Purely for organizational needs. Provides logical seperation between
-// DataConnection.Send and DataConnection.Recv.
-type DataConnection struct {
-	Target   Host
-	Listener Host
+// SetConfig is to more easily access c.Settings.TLSConnectionConfiguration
+func (c *TLSConnection) SetConfig(config tls.Config) {
+	c.Settings.TLSConnectionConfiguration = &config
 }
 
-// Returns active Conn from Host configuration.
-func (h *Host) GetConnection() net.Conn {
-	conn, err := net.Dial(h.Protocol, net.JoinHostPort(h.Address, h.Port))
+// Recv listens for data of length `len int` using tls.Listen.Accept
+func (c *TLSConnection) Recv(len int, laddr, certFile, keyFile string) []byte {
+	c.ListenerSettings.Addr = laddr
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	check(err)
 
-	return conn
-}
-
-// DataConnection constructor
-func NewDataConnection(target Host, listen Host) DataConnection {
-	return DataConnection{Target: target, Listener: listen}
-}
-
-// Send a byteslice to target using specified configuration.
-func (dConn *DataConnection) Send(data []byte) {
-	settings := dConn.Target
-	conn, err := net.Dial(settings.Protocol, net.JoinHostPort(settings.Address, settings.Port))
-	check(err)
-
-	_, err = conn.Write(data)
-	check(err)
-	conn.Close()
-}
-
-// Listen for a byteslice on a specific port. Must have localhost specification,
-// this distinction exists for applications listening on multiple internal addresses.
-func (dConn *DataConnection) Recv() []byte {
-	settings := dConn.Listener
-
-	ln, err := net.Listen(settings.Protocol, net.JoinHostPort(settings.Address, settings.Port))
+	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, c.Settings.TLSConnectionConfiguration)
 	check(err)
 
 	conn, err := ln.Accept()
 	check(err)
 
-	data, err := ioutil.ReadAll(conn)
+	data := make([]byte, len)
+	_, err = conn.Read(data)
 	check(err)
 
-	conn.Close()
+	c.Listener = conn
+
 	return data
 }
 
-/* Here is the trigger functionality */
-
-// Message encapsulation object for trigger system.
-type Message struct {
-	Data    []byte
-	Command string
-}
-
-// Implement new host types. This way there exists a incoming and outgoing trigger list.
-type TriggerDataConnection struct {
-	Target   TriggerHost
-	Listener TriggerHost
-}
-
-// Host with map of commands and corresponding variables.
-type TriggerHost struct {
-	Protocol string
-	Address  string
-	Port     string
-	Triggers map[string]func(data []byte) []byte
-}
-
-// DataConnection constructor
-func NewTriggerDataConnection(target TriggerHost, listen TriggerHost) TriggerDataConnection {
-	return TriggerDataConnection{
-		Target:   target,
-		Listener: listen,
-	}
-}
-
-// NewTriggerHost constructor. Main use is to initialize the Triggers map.
-func NewTriggerHost(protocol string, address string, port string) TriggerHost {
-	return TriggerHost{
-		Protocol: protocol,
-		Address:  address,
-		Port:     port,
-		Triggers: make(map[string]func(data []byte) []byte),
-	}
-}
-
-// A placeholder
-func NullTriggerHost() TriggerHost {
-	return TriggerHost{Triggers: make(map[string]func(data []byte) []byte),}
-}
-
-// Send a byteslice to target using specified configuration.
-func (tdc *TriggerDataConnection) Send(command string, data []byte) {
-	data = newMessage(command, data)
-	settings := tdc.Target
-	conn, err := net.Dial(settings.Protocol, net.JoinHostPort(settings.Address, settings.Port))
+// Send is used to send data using tls.Dial.
+func (c *TLSConnection) Send(data []byte, addr string) {
+	var err error
+	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, c.Settings.TLSConnectionConfiguration)
 	check(err)
 
-	_, err = conn.Write(data)
-	check(err)
-	conn.Close()
-}
-
-// Listen for a byteslice on a specific port. Must have localhost specification,
-// this distinction exists for applications listening on multiple internal addresses.
-// After recieving data, run command against trigger list. If a match is found, the output of
-// that function is returned. The recieved data is used as input.
-func (tdc *TriggerDataConnection) Recv() []byte {
-	settings := tdc.Listener
-
-	ln, err := net.Listen(settings.Protocol, net.JoinHostPort(settings.Address, settings.Port))
-	check(err)
-
-	conn, err := ln.Accept()
-	check(err)
-
-	data, err := ioutil.ReadAll(conn)
-	check(err)
-	conn.Close()
-
-	// Process message
-	var mesg Message
-	json.Unmarshal(data, &mesg)
-	return settings.resolveMessageTriggers(mesg)
-}
-
-// Add function for recieved data to be ran against by command.
-func (th *TriggerHost) Trigger(command string, function func(data []byte) []byte) {
-	th.Triggers[command] = function
-}
-
-// Return point for received messages. Processes trigger function with data as an input.
-func (th *TriggerHost) resolveMessageTriggers(m Message) []byte {
-	return th.lookupTriggers(m.Command)(m.Data)
-}
-
-// Lookup trigger functions by command for each TriggerHost.
-func (th *TriggerHost) lookupTriggers(command string) func(data []byte) []byte {
-	f := th.Triggers[command]
-	if f != nil {
-		return f
-	} else {
-		log.Fatal("Command does not exist")
-		os.Exit(1)
-		return nil
-	}
-}
-
-// Include command in data json structure.
-func newMessage(command string, data []byte) []byte {
-	mesg := Message{Data: data, Command: command}
-	out, err := json.Marshal(&mesg)
-	check(err)
-	return out
-}
-
-// Internal function to process json-encoded Messages
-func decodeMessage(data []byte) Message {
-	var m Message
-	err := json.Unmarshal(data, &m)
-
-	check(err)
-
-	return m
+	c.Outgoing.Write(data)
 }

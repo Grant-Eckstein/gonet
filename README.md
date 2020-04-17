@@ -3,7 +3,7 @@
 
 
 ### Overview
-This is a client-server networking library I built for another project. It is intended to be a extensible base for networking projects.
+This is a client-server networking library I built for another project. It is an extensible base for other networking projects.
 
 ### Example Usage - Without triggers
 ##### Client
@@ -15,13 +15,11 @@ import (
 )
 
 func main() {
-		conn := gonet.NewDataConnection(gonet.Host{
-			Protocol:   "tcp",
-			Address:    "localhost",
-			Port:       "8080",
-		}, gonet.Host{})
+	conn := gonet.NewTLS("tcp", true)
 
-		conn.Send([]byte("Hello, world!"))
+	conn.Send([]byte("Hello from client"), "localhost:4444")
+	data := conn.Recv(32, "localhost:4445", "example.crt", "example.key")
+	fmt.Printf("Recieved \"%s\" over secure websocket.\n", data)
 }
 ```
 <br>
@@ -32,67 +30,21 @@ package main
 
 import (
 	"fmt"
+	"time"
 	"gonet"
 )
 
 func main() {
 
-	conn := gonet.NewDataConnection(gonet.Host{}, gonet.Host{
-		Protocol: "tcp",
-		Address:  "localhost",
-		Port:     "8080",
-	})
+	conn := gonet6.NewTLS("tcp")
 
-	data := conn.Recv()
-	fmt.Printf("Recieved \"%s\"\n", data)
+	data := conn.Recv(128, "localhost:4444", "example.crt", "example.key")
+	fmt.Printf("Recieved \"%s\" over secure websocket.\n", data)
+	fmt.Println("Sending response...")
+
+	// Typically this is unnecessary unless
+	// running both client and server locally.
+	time.Sleep(2*time.Second)
+	conn.Send([]byte("Hello from server"), "localhost:4445")
 }
-```
-<br>
-
-### Example Usage - With triggers
-##### Client
-```go
-package main
-
-import (
-	"fmt"
-	"gonet"
-)
-
-func main() {
-
-	target := gonet.NewTriggerHost("tcp", "localhost", "8080")
-	conn := gonet.NewTriggerDataConnection(target, gonet.NullTriggerHost())
-
-	data := []byte("Grant")
-	conn.Send("test-cmd", data)
-
-	fmt.Printf("Sent \"%s\"\n", data)
-}
-```
-<br>
-
-##### Server
-```go
-package main
-
-import (
-	"gonet"
-	"fmt"
-)
-
-func main() {
-
-	listener := gonet.NewTriggerHost("tcp", "localhost", "8080")
-	conn := gonet.NewTriggerDataConnection(gonet.NullTriggerHost(), listener)
-
-	conn.Listener.Trigger("test-cmd", func(data []byte) []byte {
-		return append([]byte("Hello, "), data...)
-	})
-
-	data := conn.Recv()
-
-	fmt.Printf("Output of recieved data is \"%s\"\n", data)
-}
-
 ```
