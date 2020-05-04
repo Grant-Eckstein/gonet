@@ -54,8 +54,8 @@ func NewTLS(network string, insecure bool) TLSConnection {
 		ListenerSettings: ListenerConfiguration{},
 	}
 	if insecure {
-		c.Settings.TLSConnectionConfiguration = &tls.Config{
-			Certificates:       []tls.Certificate{cert},
+		c.Settings.TLSConnectionConfiguration = tls.Config{
+			Certificates:       nil,
 			InsecureSkipVerify: true,
 		}
 	}
@@ -64,7 +64,7 @@ func NewTLS(network string, insecure bool) TLSConnection {
 
 // SetConfig is to more easily access c.Settings.TLSConnectionConfiguration
 func (c *TLSConnection) SetConfig(config tls.Config) {
-	c.Settings.TLSConnectionConfiguration = &config
+	c.Settings.TLSConnectionConfiguration = config
 }
 
 // Recv listens for data of length `len int` using tls.Listen.Accept
@@ -74,10 +74,12 @@ func (c *TLSConnection) Recv(len int, laddr, certFile, keyFile string) []byte {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	check(err)
 
-	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, c.Settings.TLSConnectionConfiguration)
+	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
+
+	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
 	check(err)
 
-	conn, err := ln.Accept()
+	conn, _ := ln.Accept()
 	check(err)
 
 	data := make([]byte, len)
@@ -92,8 +94,9 @@ func (c *TLSConnection) Recv(len int, laddr, certFile, keyFile string) []byte {
 // Send is used to send data using tls.Dial.
 func (c *TLSConnection) Send(data []byte, addr string) {
 	var err error
-	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, c.Settings.TLSConnectionConfiguration)
+	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, &c.Settings.TLSConnectionConfiguration)
 	check(err)
 
 	c.Outgoing.Write(data)
 }
+
