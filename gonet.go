@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"log"
 	"net"
+	"encoding/json"
 )
 
 // TLSConnection embeds tls.Conn, extending functionality.
@@ -91,6 +92,30 @@ func (c *TLSConnection) Recv(len int, laddr, certFile, keyFile string) []byte {
 	return data
 }
 
+// Recv listens for data of length `len int` using tls.Listen.Accept.
+func (c *TLSConnection) RecvInline(len int, laddr string, certBlock, keyBlock []byte) []byte {
+	c.ListenerSettings.Addr = laddr
+
+	cert, err := tls.X509KeyPair(certBlock, keyBlock)
+	check(err)
+
+	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
+
+	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
+	check(err)
+
+	conn, _ := ln.Accept()
+	check(err)
+
+	data := make([]byte, len)
+	_, err = conn.Read(data)
+	check(err)
+
+	c.Listener = conn
+
+	return data
+}
+
 // Send is used to send data using tls.Dial.
 func (c *TLSConnection) Send(data []byte, addr string) {
 	var err error
@@ -98,5 +123,27 @@ func (c *TLSConnection) Send(data []byte, addr string) {
 	check(err)
 
 	c.Outgoing.Write(data)
+}
+
+type Message struct {
+	Cmd string
+	Data []byte
+}
+
+//
+func EncodeMessage(cmd string, data []byte) []byte {
+	m := Message{
+		Cmd:  cmd,
+		Data: data,
+	}
+	d, _ :=json.Marshal(m)
+	return d
+}
+
+func DecodeMessage(mesg []byte) Message {
+	var m Message
+	json.Unmarshal(mesg, &m)
+
+	return m
 }
 
