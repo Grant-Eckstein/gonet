@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"log"
 	"net"
+	"bytes"
 	"encoding/json"
 )
 
@@ -142,7 +143,7 @@ func EncodeMessage(cmd string, data []byte) []byte {
 
 func DecodeMessage(mesg []byte) Message {
 	var m Message
-	json.Unmarshal(mesg, &m)
+	json.Unmarshal(bytes.Trim(mesg, "\x00"), &m)
 
 	return m
 }
