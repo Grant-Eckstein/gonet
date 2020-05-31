@@ -126,8 +126,45 @@ func (c *TLSConnection) Send(data []byte, addr string) {
 	c.Outgoing.Write(data)
 }
 
+// SendRecv is used to send data and recieve a response of a specified length on the same TLS Connection.
+func (c *TLSConnection) SendRecv(len int, data []byte, addr string) []byte {
+	var err error
+	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, &c.Settings.TLSConnectionConfiguration)
+	check(err)
+
+	c.Outgoing.Write(data)
+	b := make([]byte, len)
+	c.Outgoing.Read(b)
+	return b
+}
+
+// RecvSendInline is used to listen for data of a specified length then respond with the processor output on the same
+// TLS Connection.
+func (c *TLSConnection) RecvSendInline(len int, laddr string, certBlock, keyBlock []byte, process func([]byte) []byte) {
+	c.ListenerSettings.Addr = laddr
+
+	cert, err := tls.X509KeyPair(certBlock, keyBlock)
+	check(err)
+
+	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
+
+	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
+	check(err)
+
+	conn, _ := ln.Accept()
+	check(err)
+
+	data := make([]byte, len)
+	_, err = conn.Read(data)
+	check(err)
+
+	c.Listener = conn
+
+	conn.Write(process(data))
+}
+
 type Message struct {
-	Cmd string
+	Cmd  string
 	Data []byte
 }
 
@@ -137,7 +174,7 @@ func EncodeMessage(cmd string, data []byte) []byte {
 		Cmd:  cmd,
 		Data: data,
 	}
-	d, _ :=json.Marshal(m)
+	d, _ := json.Marshal(m)
 	return d
 }
 
@@ -147,4 +184,3 @@ func DecodeMessage(mesg []byte) Message {
 
 	return m
 }
-
