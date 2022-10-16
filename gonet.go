@@ -1,186 +1,165 @@
-package gonet
+package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
-	"log"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/pem"
+	"math/big"
 	"net"
-	"bytes"
-	"encoding/json"
+	"net/http"
+	"os"
+	"time"
 )
 
-// TLSConnection embeds tls.Conn, extending functionality.
-// The main idea is to implement TLSConnection.Send and TLSConnection.Recv
-// allowing for more simple websocket operation.
-type TLSConnection struct {
-	tls.Conn
-	Settings         ConnectionConfiguration
-	Listener         net.Conn
-	Outgoing         *tls.Conn
-	ListenerSettings ListenerConfiguration
+type Handler struct {
+	Func HandlerFunc
+	Path string
 }
 
-// ConnectionConfiguration is included for
-// the express purpose of extensibility.
-type ConnectionConfiguration struct {
-	TLSConnectionConfiguration tls.Config
-	Protocol                   string
-	Addr                       string
-}
+type HandlerFunc func(w http.ResponseWriter, r *http.Request)
 
-// ListenerConfiguration is also included
-// for the express purpose of extensibility.
-type ListenerConfiguration struct {
-	Cert tls.Certificate
-	Addr string
-}
-
-// Check is a basic errer parsing solution.
-func check(err error) {
+func cert(hosts []string) ([]byte, []byte, error) {
+	// Create new private key object
+	private, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
-		log.Fatal(err)
+		return nil, nil, err
 	}
-}
 
-// NewTLS is the constructor for TLSConnection.
-// The primary parameter is the protocol used for the connection.
-// The insecure parameter will set the configuration for using a
-// self-signed certificate. This configuration can be replaced by using
-// TLSConnection.SetConfig.
-func NewTLS(network string, insecure bool) TLSConnection {
-	c := TLSConnection{
-		Conn: tls.Conn{},
-		Settings: ConnectionConfiguration{
-			Protocol: network,
-			Addr:     "",
-		},
-		ListenerSettings: ListenerConfiguration{},
+	// Create random serial number
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return nil, nil, err
 	}
-	if insecure {
-		c.Settings.TLSConnectionConfiguration = tls.Config{
-			Certificates:       nil,
-			InsecureSkipVerify: true,
+
+	// Hash serial number for org name
+	s := sha256.Sum256(serialNumber.Bytes())
+	org := hex.EncodeToString(s[:])[:25]
+
+	// Create cert object with our info. Valid for a year.
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{org},
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(365 * 24 * time.Hour),
+
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	// Set some configs for self signing
+	template.IsCA = true
+	template.KeyUsage = x509.KeyUsageCertSign
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, private.Public(), private)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cert := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	})
+
+	privateBytes, err := x509.MarshalPKCS8PrivateKey(private)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	//pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privateBytes})
+	key := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privateBytes,
+	})
+	// Add hosts
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, h)
 		}
 	}
-	return c
+	return cert, key, nil
 }
 
-// SetConfig is to more easily access c.Settings.TLSConnectionConfiguration
-func (c *TLSConnection) SetConfig(config tls.Config) {
-	c.Settings.TLSConnectionConfiguration = config
-}
-
-// Recv listens for data of length `len int` using tls.Listen.Accept
-func (c *TLSConnection) Recv(len int, laddr, certFile, keyFile string) []byte {
-	c.ListenerSettings.Addr = laddr
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	check(err)
-
-	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
-
-	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
-	check(err)
-
-	conn, _ := ln.Accept()
-	check(err)
-
-	data := make([]byte, len)
-	_, err = conn.Read(data)
-	check(err)
-
-	c.Listener = conn
-
-	return data
-}
-
-// Recv listens for data of length `len int` using tls.Listen.Accept.
-func (c *TLSConnection) RecvInline(len int, laddr string, certBlock, keyBlock []byte) []byte {
-	c.ListenerSettings.Addr = laddr
-
-	cert, err := tls.X509KeyPair(certBlock, keyBlock)
-	check(err)
-
-	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
-
-	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
-	check(err)
-
-	conn, _ := ln.Accept()
-	check(err)
-
-	data := make([]byte, len)
-	_, err = conn.Read(data)
-	check(err)
-
-	c.Listener = conn
-
-	return data
-}
-
-// Send is used to send data using tls.Dial.
-func (c *TLSConnection) Send(data []byte, addr string) {
-	var err error
-	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, &c.Settings.TLSConnectionConfiguration)
-	check(err)
-
-	c.Outgoing.Write(data)
-}
-
-// SendRecv is used to send data and recieve a response of a specified length on the same TLS Connection.
-func (c *TLSConnection) SendRecv(len int, data []byte, addr string) []byte {
-	var err error
-	c.Outgoing, err = tls.Dial(c.Settings.Protocol, addr, &c.Settings.TLSConnectionConfiguration)
-	check(err)
-
-	c.Outgoing.Write(data)
-	b := make([]byte, len)
-	c.Outgoing.Read(b)
-	return b
-}
-
-// RecvSendInline is used to listen for data of a specified length then respond with the processor output on the same
-// TLS Connection.
-func (c *TLSConnection) RecvSendInline(len int, laddr string, certBlock, keyBlock []byte, process func([]byte) []byte) {
-	c.ListenerSettings.Addr = laddr
-
-	cert, err := tls.X509KeyPair(certBlock, keyBlock)
-	check(err)
-
-	c.Settings.TLSConnectionConfiguration.Certificates = append(c.Settings.TLSConnectionConfiguration.Certificates, cert)
-
-	ln, err := tls.Listen(c.Settings.Protocol, c.ListenerSettings.Addr, &c.Settings.TLSConnectionConfiguration)
-	check(err)
-
-	conn, _ := ln.Accept()
-	check(err)
-
-	data := make([]byte, len)
-	_, err = conn.Read(data)
-	check(err)
-
-	c.Listener = conn
-
-	conn.Write(process(data))
-}
-
-type Message struct {
-	Cmd  string
-	Data []byte
-}
-
-//
-func EncodeMessage(cmd string, data []byte) []byte {
-	m := Message{
-		Cmd:  cmd,
-		Data: data,
+// NewHandler creates a handler object which forces a relationship between a handler and a path
+func NewHandler(p string, f HandlerFunc) Handler {
+	return Handler{
+		Path: p,
+		Func: f,
 	}
-	d, _ := json.Marshal(m)
-	return d
 }
 
-func DecodeMessage(mesg []byte) Message {
-	var m Message
-	json.Unmarshal(bytes.Trim(mesg, "\x00"), &m)
+// Server starts a new TLS 1.3 server on the specified host addresses/names and handles each handlerß
+func Server(hosts []string, handlers []Handler) error {
+	// Generate new cert on the fly
+	cert, key, err := cert(hosts)
+	if err != nil {
+		return err
+	}
 
-	return m
+	// Write cert
+	certFile, err := os.CreateTemp("", "")
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(certFile.Name(), cert, 766)
+	if err != nil {
+		return err
+	}
+
+	// Write key
+	keyFile, err := os.CreateTemp("", "")
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(keyFile.Name(), key, 766)
+	if err != nil {
+		return err
+	}
+
+	// Create new multiplexer to handle connections
+	mux := http.NewServeMux()
+
+	// Register any handlers
+	for _, h := range handlers {
+		mux.HandleFunc(h.Path, h.Func)
+	}
+
+	// With TLS 1.3 all cipher suites are considered secure and not configurable
+	cfg := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+
+	// Setup new server with our multiplexer
+	srv := &http.Server{
+		Addr:         ":443",
+		Handler:      mux,
+		TLSConfig:    cfg,
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
+	}
+
+	// ListenAndServe will never return nil error. ErrServerClosed is safe run. ß
+	err = srv.ListenAndServeTLS(certFile.Name(), keyFile.Name())
+	if err == http.ErrServerClosed {
+		err = nil
+	}
+
+	// Clean up
+	err = os.Remove(certFile.Name())
+	if err != nil {
+		return err
+	}
+
+	return err
 }
