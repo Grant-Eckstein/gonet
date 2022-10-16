@@ -1,12 +1,13 @@
 package gonet
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 )
 
-func ExampleServer() {
+func ExampleServe() {
 	h1 := NewHandler("/", func(w http.ResponseWriter, r *http.Request) {
 		_, err := w.Write([]byte("This is an example server.\n"))
 		if err != nil {
@@ -26,4 +27,13 @@ func ExampleServer() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func ExampleSend() {
+	res, err := Send("localhost:443", []byte("hello, world"), 50)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Server replied: '%v'\n", string(res))
 }
