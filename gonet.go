@@ -99,8 +99,8 @@ func NewHandler(p string, f HandlerFunc) Handler {
 	}
 }
 
-// Server starts a new TLS 1.3 server on the specified host addresses/names and handles each handlerß
-func Server(hosts []string, handlers []Handler) error {
+// Serve starts a new TLS 1.3 server on the specified host addresses/names and handles each handlerß
+func Serve(hosts []string, handlers []Handler) error {
 	// Generate new cert on the fly
 	cert, key, err := cert(hosts)
 	if err != nil {

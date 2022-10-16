@@ -22,7 +22,7 @@ func ExampleServer() {
 		}
 	})
 
-	err := Server([]string{"localhost"}, []Handler{h1, h2})
+	err := Serve([]string{"localhost"}, []Handler{h1, h2})
 	if err != nil {
 		panic(err)
 	}
