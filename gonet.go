@@ -99,7 +99,7 @@ func NewHandler(p string, f HandlerFunc) Handler {
 	}
 }
 
-// Serve starts a new TLS 1.3 server on the specified host addresses/names and handles each handlerß
+// Serve starts a new TLS 1.3 server on the specified host addresses/names and handles each handler
 func Serve(hosts []string, handlers []Handler) error {
 	// Generate new cert on the fly
 	cert, key, err := cert(hosts)
