@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -100,7 +101,7 @@ func NewHandler(p string, f HandlerFunc) Handler {
 }
 
 // Serve starts a new TLS 1.3 server on the specified host addresses/names and handles each handler
-func Serve(hosts []string, handlers []Handler) error {
+func Serve(hosts []string, handlers []Handler, port int) error {
 	// Generate new cert on the fly
 	cert, key, err := cert(hosts)
 	if err != nil {
@@ -143,7 +144,7 @@ func Serve(hosts []string, handlers []Handler) error {
 
 	// Setup new server with our multiplexer
 	srv := &http.Server{
-		Addr:         ":443",
+		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
 		TLSConfig:    cfg,
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
@@ -162,39 +163,4 @@ func Serve(hosts []string, handlers []Handler) error {
 	}
 
 	return err
-}
-
-func Send(remote string, data []byte, responseLength int) ([]byte, error) {
-	// InsecureSkipVerify allows for self-signed certs
-	conf := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-
-	// Create connection with server
-	conn, err := tls.Dial("tcp", remote, conf)
-	if err != nil {
-		return nil, err
-	}
-
-	// Handle error on closure
-	defer func(conn *tls.Conn) {
-		err = conn.Close()
-	}(conn)
-
-	// Send data
-	_, err = conn.Write(data)
-	if err != nil {
-		return nil, err
-	}
-
-	// Receive response of specified length
-	buf := make([]byte, responseLength)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	// Resize buffer and return
-	buf = buf[:n]
-	return buf, nil
 }
