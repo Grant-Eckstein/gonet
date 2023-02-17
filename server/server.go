@@ -94,9 +94,19 @@ func cert(hosts []string) ([]byte, []byte, error) {
 
 // NewHandler creates a handler object which forces a relationship between a handler and a path
 func NewHandler(p string, f HandlerFunc) Handler {
+
+	// This wraps our handler in a function that will only respond to requests that match our path
+	safe_f := func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != p {
+			return
+		} else {
+			f(w, r)
+		}
+	}
+
 	return Handler{
 		Path: p,
-		Func: f,
+		Func: safe_f,
 	}
 }
 
